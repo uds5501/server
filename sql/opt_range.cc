@@ -3454,6 +3454,9 @@ int cmp_quick_ranges(TABLE::OPT_RANGE **a, TABLE::OPT_RANGE **b)
     TRUE   otherwise 
 */
 
+
+// TODO: Read up about this and try to come up with your own.
+// here cond can be WHERE clause or simple ON
 bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
 {
   uint keynr, range_index, ranges;
@@ -3510,6 +3513,8 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
   /*
     Walk through all quick ranges in the order of least found rows.
   */
+  // NOTE: opt_range_keys in the table is a key_map.
+  // We are setting in the optimal_key_range array all the keys where ranges are set.
   for (ranges= keynr= 0 ; keynr < table->s->keys; keynr++)
     if (table->opt_range_keys.is_set(keynr))
       optimal_key_order[ranges++]= table->opt_range + keynr;
@@ -3524,6 +3529,7 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
     uint keynr= (uint)(range - table->opt_range);
     uint i;
     uint used_key_parts= range->key_parts;
+    // selectivity = number of rows in this range / total table_records.
     double quick_cond_selectivity= (range->rows / table_records);
     KEY *key_info= table->key_info + keynr;
     KEY_PART_INFO* key_part= key_info->key_part;
@@ -3549,9 +3555,12 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
     */
     for (i= 0; i < used_key_parts; i++)
     {
+      // taking example above, if key1(col1, col2) is already set.
       if (bitmap_is_set(&handled_columns, key_part[i].fieldnr-1))
       {
         double rec_per_key;
+        // since i = 0 (let's say key_part[i] = col2 and it's pre set then we can't use this key.)
+        // ex: KEY2 above is skipped.
         if (!i)
         {
           /*

@@ -24,7 +24,7 @@
 #include "my_json_writer.h"
 #include "opt_range.h"
 #include "sql_expression_cache.h"
-
+#include "log.h"
 #include <stack>
 
 const char * STR_DELETING_ALL_ROWS= "Deleting all rows";
@@ -85,6 +85,7 @@ Explain_query::~Explain_query()
 
 Explain_node *Explain_query::get_node(uint select_id)
 {
+  sql_print_information("getting a node");
   Explain_union *u;
   if ((u= get_union(select_id)))
     return u;
@@ -251,6 +252,7 @@ int Explain_query::print_explain(select_result_sink *output,
   }
   else
   {
+    sql_print_information("starting with explain infomration");
     /* Start printing from node with id=1 */
     Explain_node *node= get_node(1);
     if (!node)
@@ -1002,7 +1004,7 @@ int Explain_select::print_explain(Explain_query *query,
 {
   THD *thd= output->thd;
   MEM_ROOT *mem_root= thd->mem_root;
-
+  sql_print_information("print explain in select");
   if (select_type == pushed_derived_text || select_type == pushed_select_text)
   {
      print_explain_message_line(output, explain_flags, is_analyze,

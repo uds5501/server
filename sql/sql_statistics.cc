@@ -1710,6 +1710,8 @@ Histogram_builder *Histogram_binary::create_builder(Field *col, uint col_len,
 }
 
 
+
+// TODO: creating histogram.
 Histogram_base *create_histogram(MEM_ROOT *mem_root, Histogram_type hist_type)
 {
   Histogram_base *res= NULL;

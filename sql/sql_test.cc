@@ -653,7 +653,7 @@ Memory allocated by threads:             %s\n",
          llstr(tmp.global_memory_used, llbuff[8]),
          llstr(tmp.local_memory_used, llbuff[9]));
 
-#elif defined(HAVE_MALLOC_ZONE)
+#elif 0
   malloc_statistics_t info;
   char llbuff[4][22];
 

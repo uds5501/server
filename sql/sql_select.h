@@ -1994,6 +1994,7 @@ bool setup_copy_fields(THD *thd, TMP_TABLE_PARAM *param,
 void copy_fields(TMP_TABLE_PARAM *param);
 bool copy_funcs(Item **func_ptr, const THD *thd);
 uint find_shortest_key(TABLE *table, const key_map *usable_keys);
+uint find_longest_key(TABLE *table, const key_map *usabele_keys);
 bool is_indexed_agg_distinct(JOIN *join, List<Item_field> *out_args);
 
 /* functions from opt_sum.cc */

@@ -8012,11 +8012,14 @@ void set_position(JOIN *join,uint idx,JOIN_TAB *table,KEYUSE *key)
     checked after joining rows from this table to rows from preceding tables.
 */
 
+
+// TODO: mess around with this tomorrow.
 static double apply_selectivity_for_table(JOIN_TAB *s,
                                           uint use_cond_selectivity)
 {
   double dbl_records;
 
+ // by default this will work
   if (use_cond_selectivity > 1)
   {
     TABLE *table= s->table;
@@ -16058,7 +16061,7 @@ void JOIN_TAB::estimate_scan_time()
 
       if (!table->covering_keys.is_clear_all() && ! table->no_keyread)
       {
-        cached_covering_key= find_shortest_key(table, &table->covering_keys);
+        cached_covering_key= find_longest_key(table, &table->covering_keys);
         cost->index_cost= file->ha_key_scan_time(cached_covering_key, records);
         read_time= file->cost(cost->index_cost);
         row_copy_cost= 0;              // Included in ha_key_scan_time
@@ -26144,6 +26147,34 @@ uint find_shortest_key(TABLE *table, const key_map *usable_keys)
         if (length < min_length)
         {
           min_length= length;
+          best= nr;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+
+uint find_longest_key(TABLE *table, const key_map *usable_keys)
+{
+  size_t max_length= INT_MIN32;
+  uint best= 0;
+  uint possible_keys= usable_keys->bits_set();
+
+  if (possible_keys)
+  {
+    if (possible_keys == 1)
+      return usable_keys->find_first_bit();
+
+    for (uint nr=0; nr < table->s->keys ; nr++)
+    {
+      if (usable_keys->is_set(nr))
+      {
+        size_t length= table->key_storage_length(nr);
+        if (length > max_length)
+        {
+          max_length= length;
           best= nr;
         }
       }
