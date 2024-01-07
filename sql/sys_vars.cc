@@ -6752,7 +6752,8 @@ static Sys_var_enum Sys_histogram_type(
        "Possible values are: "
        "SINGLE_PREC_HB - single precision height-balanced, "
        "DOUBLE_PREC_HB - double precision height-balanced, "
-       "JSON_HB - height-balanced, stored as JSON.",
+       "JSON_HB - height-balanced, stored as JSON, "
+       "RANGE_HB - single precision, width-balanced, ",
        SESSION_VAR(histogram_type), CMD_LINE(REQUIRED_ARG),
        histogram_types, DEFAULT(2));
 

@@ -47,6 +47,7 @@ enum enum_histogram_type
   SINGLE_PREC_HB,
   DOUBLE_PREC_HB,
   JSON_HB,
+  RANGE_HB,
   INVALID_HISTOGRAM
 } Histogram_type;
 
@@ -214,9 +215,9 @@ public:
   A Height-balanced histogram that stores numeric fractions
 */
 
-class Histogram_binary final : public Histogram_base
+class Histogram_binary : public Histogram_base
 {
-private:
+protected:
   Histogram_type type;
   size_t size; /* Size of values array, in bytes */
   uchar *values;
@@ -250,7 +251,7 @@ public:
     }
     return 0;
   }
-private:
+protected:
   uint get_value(uint i)
   {
     DBUG_ASSERT(i < get_width());
@@ -273,6 +274,7 @@ private:
     int rp= get_width() - 1;
     int d= get_width() / 2;
     uint i= lp + d;
+    // it's just binary search lol.
     for ( ; d;  d= (rp - lp) / 2, i= lp + d)
     {
       if (val == get_value(i))
@@ -357,6 +359,59 @@ public:
                            double avg_sel) override;
 };
 
+class Histogram_range_binary final: public Histogram_base {
+
+  Histogram_type type;
+  size_t size; /* Size of values array, in bytes */
+  uchar *values;
+
+  uint prec_factor()
+  {
+    return ((uint) (1 << 8) - 1);
+  }
+  
+  public:
+    Histogram_range_binary() {
+      type = RANGE_HB;
+    }
+
+    uint get_width() override
+    {
+      return size;
+    }
+
+    uint get_size() override
+    {
+      return (uint)size;
+    }
+
+    Histogram_type get_type() override {return type;}
+
+    bool parse(MEM_ROOT *mem_root, const char*, const char*, Field*,
+             const char *hist_data, size_t hist_data_len) override ;
+    void serialize(Field *to_field) override;
+    void init_for_collection(MEM_ROOT *mem_root, Histogram_type htype_arg,
+                            ulonglong size) override ;
+    Histogram_builder *create_builder(Field *col, uint col_len,
+                                      ha_rows rows) override;
+
+    double point_selectivity(Field *field, key_range *endpoint,
+                           double avg_sel) override;
+    double range_selectivity(Field *field, key_range *min_endp,
+                           key_range *max_endp, double avg_sel) override;
+
+    void set_value(uint i, double val) {
+      ((double *) values)[i]= (double) (val);
+    }
+
+  private:
+    double get_value_double(uint i)
+    {
+      DBUG_ASSERT(i < get_width());
+      return (double) (((double *) values)[i]);
+    }
+};
+
 
 /*
   This is used to collect the the basic statistics from a Unique object:
@@ -367,6 +422,7 @@ public:
 
 class Basic_stats_collector
 {
+protected:
   ulonglong count;         /* number of values retrieved                   */
   ulonglong count_distinct;    /* number of distinct values retrieved      */
   /* number of distinct values that occurred only once  */
@@ -396,6 +452,40 @@ public:
   }
 };
 
+class Advanced_stats_collector : public Basic_stats_collector
+{
+  std::vector<ulonglong> frequency;
+  std::vector<double> pos_in_interval_store;
+
+public:
+  Advanced_stats_collector() {
+    frequency = {};
+  }
+  
+  void next(void *elem, element_count elem_cnt) {
+    count_distinct++;
+    if (elem_cnt == 1)
+      count_distinct_single_occurence++;
+    count+= elem_cnt;
+    frequency.push_back(elem_cnt);
+  }
+
+  void push_pos(double pos) {
+    pos_in_interval_store.push_back(pos);
+  }
+
+  bool valid() {
+    return frequency.size() == pos_in_interval_store.size();
+  }
+
+  double pos_at(uint i) {
+    return pos_in_interval_store[i];
+  }
+
+  ulonglong frequency_at(uint i) {
+    return frequency[i];
+  }
+};
 
 /*
   Histogram_builder is a helper class that is used to build histograms

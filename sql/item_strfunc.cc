@@ -670,13 +670,15 @@ err:
 
 
 const char *histogram_types[] =
-    {"SINGLE_PREC_HB", "DOUBLE_PREC_HB", "JSON_HB", 0};
+    {"SINGLE_PREC_HB", "DOUBLE_PREC_HB", "JSON_HB", "RANGE_HB",0};
 static TYPELIB histogram_types_typelib=
   { array_elements(histogram_types),
     "histogram_types",
     histogram_types, NULL};
 const char *representation_by_type[]= {"%.3f", "%.5f"};
 
+
+//TODO: Do this for RANGE_HB
 String *Item_func_decode_histogram::val_str(String *str)
 {
   DBUG_ASSERT(fixed());
@@ -724,6 +726,8 @@ String *Item_func_decode_histogram::val_str(String *str)
     case SINGLE_PREC_HB:
       val= p[i] / ((double)((1 << 8) - 1));
       break;
+    case RANGE_HB:
+      val = p[i];
     case DOUBLE_PREC_HB:
       val= uint2korr(p + i) / ((double)((1 << 16) - 1));
       i++;

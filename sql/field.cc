@@ -37,6 +37,7 @@
 #include "filesort.h"                    // change_double_for_sort
 #include "log_event.h"                   // class Table_map_log_event
 #include <m_ctype.h>
+#include "log.h"
 
 // Maximum allowed exponent value for converting string to decimal
 #define MAX_EXPONENT 1024
@@ -1156,6 +1157,7 @@ Field_longstr::pack_sort_string(uchar *to, const SORT_FIELD_ATTR *sort_field)
 double pos_in_interval_for_double(double midp_val, double min_val,
                                   double max_val)
 {
+  // sql_print_information("[Debug pos_in_interval] midp : %f, min_val: %f, max_val: %f", midp_val, min_val, max_val);
   double n, d;
   n= midp_val - min_val;
   if (n < 0)

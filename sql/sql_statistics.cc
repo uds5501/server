@@ -25,6 +25,7 @@
 */
 
 #include "mariadb.h"
+#include "my_decimal.h"
 #include "sql_base.h"
 #include "key.h"
 #include "sql_statistics.h"
@@ -34,6 +35,7 @@
 #include "sql_show.h"
 #include "sql_partition.h"
 #include "sql_alter.h"                          // RENAME_STAT_PARAMS
+#include "log.h"
 
 #include <vector>
 #include <string>
@@ -212,7 +214,7 @@ TABLE_FIELD_TYPE column_stat_fields[COLUMN_STAT_N_FIELDS] =
   },
   {
     { STRING_WITH_LEN("hist_type") },
-    { STRING_WITH_LEN("enum('SINGLE_PREC_HB','DOUBLE_PREC_HB','JSON_HB')") },
+    { STRING_WITH_LEN("enum('SINGLE_PREC_HB','DOUBLE_PREC_HB','JSON_HB','RANGE_HB')") },
     { STRING_WITH_LEN("utf8mb3") }
   },
   {
@@ -1656,6 +1658,110 @@ public:
   }
 };
 
+
+// For now copy paste the binary.
+class Histogram_range_builder : public Histogram_builder {
+  Advanced_stats_collector advanced_counter; // Init the new advanced counter here.
+  Field *min_value;        /* pointer to the minimal value for the field   */
+  Field *max_value;        /* pointer to the maximal value for the field   */
+  Histogram_range_binary *histogram;  /* the histogram location                  */
+  uint hist_width;         /* the number of points in the histogram        */
+  uint curr_bucket;        /* number of the current bucket to be built     */  
+  uint curr_ptr;           /* current pointer to tack position */
+public:
+  Histogram_range_builder(Field *col, uint col_len, ha_rows rows)
+  :Histogram_builder(col, col_len, rows)
+  {
+    Column_statistics *col_stats= col->collected_stats;
+    min_value= col_stats->min_value;
+    max_value= col_stats->max_value;
+    histogram= (Histogram_range_binary*)col_stats->histogram;
+    hist_width= histogram->get_width();
+    curr_bucket= 0;
+    curr_ptr = 0;
+  }
+
+  int next(void *elem, element_count elem_cnt) override
+  {
+    counters.next(elem, elem_cnt);
+    advanced_counter.next(elem, elem_cnt);
+    column->store_field_value((uchar *) elem, col_length);
+    double position_in_interval = column->pos_in_interval(min_value, max_value);
+    advanced_counter.push_pos(position_in_interval);
+    return 0;
+  }
+
+  void finalize() override 
+  {
+    // here build the histogram.
+    DBUG_ASSERT(advanced_counter.valid());
+    double bucket_range = 1.0 / hist_width;
+
+    ulonglong distinctValues = counters.get_count_distinct();
+    ulonglong totalCnt = counters.get_count();
+    
+    
+    double pos_min = bucket_range * curr_bucket;
+    double pos_max = bucket_range * (curr_bucket+1);
+    if (pos_max > 1.0) {
+      pos_max = 1.0;
+    }
+
+    ulonglong runningSum = 0;
+    for (curr_ptr=0; curr_ptr<distinctValues; curr_ptr++) {
+      double curr_pos = advanced_counter.pos_at(curr_ptr);
+      if (curr_pos >= pos_min && curr_pos < pos_max) {
+        // currently in bucket.
+        runningSum += advanced_counter.frequency_at(curr_ptr);
+        sql_print_information("[Range Histogram Set] Running sum: %llu, curr_freq: %llu", runningSum, advanced_counter.frequency_at(curr_ptr));
+        
+      } else if (curr_pos == pos_max && curr_ptr == distinctValues-1) {
+        // last bucket.
+        runningSum += advanced_counter.frequency_at(curr_ptr);
+        sql_print_information("[Range Histogram Set][LAST BUCKET] Running sum: %llu, curr_freq: %llu", runningSum, advanced_counter.frequency_at(curr_ptr));
+      } else {
+        // we need to fill the buckets with runningSum till pos_max is again > curr_pos
+        while (curr_bucket != hist_width && pos_max < curr_pos && pos_max != 1.0) {
+          if (curr_pos >= pos_min && curr_pos < pos_max) {
+            double val = (double)runningSum / totalCnt;
+            sql_print_information("[Range Histogram Set] setting value %f in bucket %u, range : [%f, %f), curr_pos : %f", val, curr_bucket, pos_min, pos_max, curr_pos);
+            histogram->set_value(curr_bucket, val);
+          }
+          curr_bucket++;
+          runningSum = 0;
+          pos_min = bucket_range * curr_bucket;
+          pos_max = bucket_range * (curr_bucket+1);
+          if (pos_max > 1.0) {
+            pos_max = 1.0;
+          }
+        }
+      }
+    }
+    if (curr_ptr == distinctValues) {
+      double val = (double)runningSum / totalCnt;
+      sql_print_information("[Range Histogram Set][Outside] setting value %f in bucket %u, range : [%f, %f)", val, curr_bucket, pos_min, pos_max);
+      histogram->set_value(curr_bucket, val);
+      curr_bucket++;
+    }
+  }
+};
+
+void Histogram_range_binary::init_for_collection(MEM_ROOT *mem_root,
+                                           Histogram_type htype_arg,
+                                           ulonglong size_arg)
+{
+  type= htype_arg;
+  values= (uchar*)alloc_root(mem_root, (size_t)size_arg);
+  size= (uint8) size_arg;
+}
+
+
+Histogram_builder *Histogram_range_binary::create_builder(Field *col, uint col_len,
+                                                    ha_rows rows)
+{
+  return new Histogram_range_builder(col, col_len, rows);
+}
+
 class Histogram_binary_builder : public Histogram_builder
 {
   Field *min_value;        /* pointer to the minimal value for the field   */
@@ -1687,12 +1793,14 @@ public:
     if (count > bucket_capacity * (curr_bucket + 1))
     {
       column->store_field_value((uchar *) elem, col_length);
+      sql_print_information("[Histogram Set] count: %llu, pos_in_interval: %f", count,column->pos_in_interval(min_value, max_value));
       histogram->set_value(curr_bucket,
                            column->pos_in_interval(min_value, max_value));
       curr_bucket++;
       while (curr_bucket != hist_width &&
              count > bucket_capacity * (curr_bucket + 1))
       {
+        sql_print_information("[Histogram Set Prev] count: %llu, pos_in_interval: %f", count,column->pos_in_interval(min_value, max_value));
         histogram->set_prev_value(curr_bucket);
         curr_bucket++;
       }
@@ -1722,6 +1830,9 @@ Histogram_base *create_histogram(MEM_ROOT *mem_root, Histogram_type hist_type)
     break;
   case JSON_HB:
     res= new (mem_root) Histogram_json_hb();
+    break;
+  case RANGE_HB:
+    res = new (mem_root) Histogram_range_binary();
     break;
   default:
     DBUG_ASSERT(0);
@@ -4392,7 +4503,8 @@ double Histogram_binary::point_selectivity(Field *field, key_range *endpoint,
       The value occupies multiple buckets. Use start_bucket ... end_bucket as
       selectivity.
     */
-    double bucket_sel= 1.0/(get_width() + 1);  
+    double selectivity_per_bucket = 1.0;
+    double bucket_sel= selectivity_per_bucket/(get_width() + 1);
     sel= bucket_sel * (max - min + 1);
   }
   else
@@ -4407,6 +4519,42 @@ double Histogram_binary::point_selectivity(Field *field, key_range *endpoint,
     double avg_bucket_width= 1.0 / (get_width() + 1);
 
     sel= MY_MIN(avg_bucket_width, avg_sel);
+  }
+  sql_print_information("[point_selectivity] avg_sel: %f, point_sel: %f", avg_sel, sel);
+  return sel;
+}
+
+double Histogram_range_binary::point_selectivity(Field *field, key_range *endpoint, 
+                                                 double avg_sel) {
+  double sel;
+  Column_statistics *col_stats= field->read_stats;
+  store_key_image_to_rec(field, (uchar *) endpoint->key,
+                         field->key_length());
+  double pos= field->pos_in_interval(col_stats->min_value,
+                                     col_stats->max_value);
+  
+  // find the bucket where this pos
+  
+  double bucket_range = 1.0 / get_width();
+  int bucket;
+
+  for (bucket=0; bucket < get_width(); bucket++) {
+    double min_pos = bucket_range * bucket;
+    double max_pos = bucket_range * (bucket + 1);
+    if (max_pos > 1.0) {
+      max_pos = 1.0;
+    }
+    if (pos >= min_pos && pos < max_pos) {
+      break;
+    }
+  }
+  if (pos == 1.0) {
+    bucket = get_width()-1;
+  }
+  sel = get_value_double(bucket);
+  sql_print_information("[range histogram::point_selectivity] avg_sel: %f, point_sel: %f", avg_sel, sel);
+  if (sel == 0) {
+    return avg_sel;
   }
   return sel;
 }
@@ -4445,7 +4593,76 @@ double Histogram_binary::range_selectivity(Field *field,
   sel= bucket_sel * (max - min + 1);
 
   set_if_bigger(sel, avg_sel);
+  sql_print_information("[range_sel] avg_sel: %f, range_sel: %f", avg_sel, sel);
   return sel;
+}
+
+double Histogram_range_binary::range_selectivity(Field *field, key_range *min_endp, key_range *max_endp, double avg_sel) {
+  double sel, min_mp_pos, max_mp_pos;
+  Column_statistics *col_stats= field->read_stats;
+
+  if (min_endp && !(field->null_ptr && min_endp->key[0]))
+  {
+    store_key_image_to_rec(field, (uchar *) min_endp->key,
+                           field->key_length());
+    min_mp_pos=
+        field->pos_in_interval(col_stats->min_value, col_stats->max_value);
+  }
+  else
+    min_mp_pos= 0.0;
+  if (max_endp)
+  {
+    store_key_image_to_rec(field, (uchar *) max_endp->key,
+                           field->key_length());
+    max_mp_pos=
+        field->pos_in_interval(col_stats->min_value, col_stats->max_value);
+  }
+  else
+    max_mp_pos= 1.0;
+  
+  double bucket_range = 1.0 / get_width();
+  uint bucket, bucket_min, bucket_max;
+  for (bucket=0; bucket < get_width(); bucket++) {
+    double min_pos = bucket_range * bucket;
+    double max_pos = bucket_range * (bucket + 1);
+    if (max_pos > 1.0) {
+      max_pos = 1.0;
+    }
+    if (min_mp_pos >= min_pos && min_mp_pos < max_pos) {
+      bucket_min = bucket;
+    }
+    if (max_mp_pos >= min_pos && max_mp_pos < max_pos) {
+      bucket_max = bucket;
+    }
+  }
+
+  if (max_mp_pos == 1.0) {
+    bucket_max = get_width() - 1;
+  }
+  if (min_mp_pos == 1.0) {
+    bucket_min = get_width() - 1;
+  }
+
+  sel = 0.0;
+  for (int i = bucket_min; i<=bucket_max; i++) {
+    sel += get_value_double(bucket);
+  }
+  sql_print_information("[range_histogram::range_sel] avg_sel: %f, range_sel: %f", avg_sel, sel);
+  set_if_bigger(sel, avg_sel);
+  return sel;
+}
+
+// TODO: implement
+bool Histogram_range_binary::parse(MEM_ROOT *mem_root,
+                     const char *db_name, const char *table_name,
+                     Field *field, const char *hist_data,
+                     size_t hist_data_len)
+{
+  return false;
+}
+
+void Histogram_range_binary::serialize(Field *to_field) {
+  return;
 }
 
 /*
