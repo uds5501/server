@@ -251,7 +251,7 @@ public:
     }
     return 0;
   }
-protected:
+private:
   uint get_value(uint i)
   {
     DBUG_ASSERT(i < get_width());
@@ -365,11 +365,6 @@ class Histogram_range_binary final: public Histogram_base {
   size_t size; /* Size of values array, in bytes */
   uchar *values;
 
-  uint prec_factor()
-  {
-    return ((uint) (1 << 8) - 1);
-  }
-  
   public:
     Histogram_range_binary() {
       type = RANGE_HB;
@@ -459,7 +454,9 @@ class Advanced_stats_collector : public Basic_stats_collector
 
 public:
   Advanced_stats_collector() {
-    frequency = {};
+    count= 0;
+    count_distinct= 0;
+    count_distinct_single_occurence= 0;
   }
   
   void next(void *elem, element_count elem_cnt) {
