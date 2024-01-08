@@ -739,7 +739,10 @@ String *Item_func_decode_histogram::val_str(String *str)
     size_t size= my_snprintf(numbuf, sizeof(numbuf),
                           representation_by_type[type], val - prev);
     str->append(numbuf, size);
-    if (type != RANGE_HB && i == res->length()-1) {
+    if (type != RANGE_HB) {
+      str->append(',');
+    }
+    if (type == RANGE_HB && i != res->length()-1) {
       str->append(',');
     }
     if (type != RANGE_HB) {
