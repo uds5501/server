@@ -1700,7 +1700,7 @@ public:
     ulonglong distinctValues = counters.get_count_distinct();
     ulonglong totalCnt = counters.get_count();
     
-    
+    double default_val = 0.0;
     double pos_min = bucket_range * curr_bucket;
     double pos_max = bucket_range * (curr_bucket+1);
     double running_pos;
@@ -1715,7 +1715,7 @@ public:
         // currently in bucket.
         runningSum += advanced_counter.frequency_at(curr_ptr);
         running_pos = curr_pos;
-        sql_print_information("[Range Histogram Set] Running sum: %llu, curr_freq: %llu", runningSum, advanced_counter.frequency_at(curr_ptr));
+        // sql_print_information("[Range Histogram Set] Running sum: %llu, curr_freq: %llu", runningSum, advanced_counter.frequency_at(curr_ptr));
         
       } else if (curr_pos == pos_max && curr_ptr == distinctValues-1) {
         // last bucket.
@@ -1723,9 +1723,11 @@ public:
           while (curr_bucket != hist_width && pos_max < curr_pos && pos_max != 1.0) {
             if (running_pos >= pos_min && running_pos < pos_max) {
               double val = (double)runningSum / totalCnt;
-              sql_print_information("[Range Histogram Set] setting value %f in bucket %u, range : [%f, %f), curr_pos : %f", val, curr_bucket, pos_min, pos_max, curr_pos);
+              // sql_print_information("[Range Histogram Set] setting value %f in bucket %u, range : [%f, %f), curr_pos : %f", val, curr_bucket, pos_min, pos_max, curr_pos);
               histogram->set_value(curr_bucket, val);
               runningSum = 0;
+            } else {
+              histogram->set_value(curr_bucket, default_val);
             }
             curr_bucket++;
             pos_min = bucket_range * curr_bucket;
@@ -1737,15 +1739,17 @@ public:
         }
         runningSum += advanced_counter.frequency_at(curr_ptr);
         running_pos = curr_pos;
-        sql_print_information("[Range Histogram Set][LAST BUCKET] Running sum: %llu, curr_freq: %llu", runningSum, advanced_counter.frequency_at(curr_ptr));
+        // sql_print_information("[Range Histogram Set][LAST BUCKET] Running sum: %llu, curr_freq: %llu", runningSum, advanced_counter.frequency_at(curr_ptr));
       } else {
         // we need to fill the buckets with runningSum till pos_max is again > curr_pos
         while (curr_bucket != hist_width && pos_max < curr_pos && pos_max != 1.0) {
           if (running_pos >= pos_min && running_pos < pos_max) {
             double val = (double)runningSum / totalCnt;
-            sql_print_information("[Range Histogram Set] setting value %f in bucket %u, range : [%f, %f), curr_pos : %f", val, curr_bucket, pos_min, pos_max, curr_pos);
+            // sql_print_information("[Range Histogram Set] setting value %f in bucket %u, range : [%f, %f), curr_pos : %f", val, curr_bucket, pos_min, pos_max, curr_pos);
             histogram->set_value(curr_bucket, val);
             runningSum = 0;
+          } else {
+              histogram->set_value(curr_bucket, default_val);
           }
           curr_bucket++;
           pos_min = bucket_range * curr_bucket;
@@ -1754,7 +1758,7 @@ public:
             pos_max = 1.0;
           }
         }
-        if (curr_pos >= pos_min && curr_pos < pos_max) {
+        if (curr_pos >= pos_min && curr_pos <= pos_max ) {
           runningSum += advanced_counter.frequency_at(curr_ptr);
           running_pos = curr_pos;
         }
@@ -1762,7 +1766,7 @@ public:
     }
     if (curr_ptr == distinctValues) {
       double val = (double)runningSum / totalCnt;
-      sql_print_information("[Range Histogram Set][Outside] setting value %f in bucket %u, range : [%f, %f)", val, curr_bucket, pos_min, pos_max);
+      // sql_print_information("[Range Histogram Set][Outside] setting value %f in bucket %u, range : [%f, %f)", val, curr_bucket, pos_min, pos_max);
       histogram->set_value(curr_bucket, val);
       curr_bucket++;
     }
@@ -1817,14 +1821,14 @@ public:
     if (count > bucket_capacity * (curr_bucket + 1))
     {
       column->store_field_value((uchar *) elem, col_length);
-      sql_print_information("[Histogram Set] count: %llu, pos_in_interval: %f", count,column->pos_in_interval(min_value, max_value));
+      // sql_print_information("[Histogram Set] count: %llu, pos_in_interval: %f", count,column->pos_in_interval(min_value, max_value));
       histogram->set_value(curr_bucket,
                            column->pos_in_interval(min_value, max_value));
       curr_bucket++;
       while (curr_bucket != hist_width &&
              count > bucket_capacity * (curr_bucket + 1))
       {
-        sql_print_information("[Histogram Set Prev] count: %llu, pos_in_interval: %f", count,column->pos_in_interval(min_value, max_value));
+        // sql_print_information("[Histogram Set Prev] count: %llu, pos_in_interval: %f", count,column->pos_in_interval(min_value, max_value));
         histogram->set_prev_value(curr_bucket);
         curr_bucket++;
       }
@@ -4618,7 +4622,7 @@ double Histogram_binary::range_selectivity(Field *field,
   sel= bucket_sel * (max - min + 1);
 
   set_if_bigger(sel, avg_sel);
-  sql_print_information("[range_sel] avg_sel: %f, range_sel: %f", avg_sel, sel);
+  sql_print_information("[histogram_binary] avg_sel: %f, range_sel: %f", avg_sel, sel);
   return sel;
 }
 
@@ -4669,10 +4673,10 @@ double Histogram_range_binary::range_selectivity(Field *field, key_range *min_en
   }
 
   sel = 0.0;
-  for (int i = bucket_min; i<=bucket_max; i++) {
+  for (uint i = bucket_min; i<=bucket_max; i++) {
     sel += get_value_double(i);
   }
-  sql_print_information("[range_histogram::range_sel] avg_sel: %f, range_sel: %f", avg_sel, sel);
+  sql_print_information("[histogram_range_binary::range_sel] avg_sel: %f, range_sel: %f", avg_sel, sel);
   set_if_bigger(sel, avg_sel);
   return sel;
 }

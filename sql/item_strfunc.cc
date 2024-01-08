@@ -724,10 +724,8 @@ String *Item_func_decode_histogram::val_str(String *str)
     switch (type)
     {
     case SINGLE_PREC_HB:
-      val= p[i] / ((double)((1 << 8) - 1));
-      break;
     case RANGE_HB:
-      val = (double)p[i];
+      val= p[i] / ((double)((1 << 8) - 1));
       break;
     case DOUBLE_PREC_HB:
       val= uint2korr(p + i) / ((double)((1 << 16) - 1));
@@ -741,13 +739,21 @@ String *Item_func_decode_histogram::val_str(String *str)
     size_t size= my_snprintf(numbuf, sizeof(numbuf),
                           representation_by_type[type], val - prev);
     str->append(numbuf, size);
-    str->append(',');
-    prev= val;
+    if (type != RANGE_HB && i == res->length()-1) {
+      str->append(',');
+    }
+    if (type != RANGE_HB) {
+      prev= val;
+    }
   }
-  /* show delta with max */
-  size_t size= my_snprintf(numbuf, sizeof(numbuf),
-                        representation_by_type[type], 1.0 - prev);
-  str->append(numbuf, size);
+
+  if (type != RANGE_HB)
+  {  
+    /* show delta with max */
+    size_t size= my_snprintf(numbuf, sizeof(numbuf),
+                          representation_by_type[type], 1.0 - prev);
+    str->append(numbuf, size);
+  }
 
   null_value=0;
   return str;

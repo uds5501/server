@@ -16,6 +16,7 @@
 #ifndef SQL_STATISTICS_H
 #define SQL_STATISTICS_H
 
+#include "log.h"
 #include <vector>
 #include <string>
 
@@ -396,14 +397,16 @@ class Histogram_range_binary final: public Histogram_base {
                            key_range *max_endp, double avg_sel) override;
 
     void set_value(uint i, double val) {
-      ((double *) values)[i]= (double) (val);
+      ((uint8 *) values)[i]= (uint8) (val * ((uint) (1 << 8) - 1));
+      // sql_print_information("[SET] value[%u] = %f", i, (((uint8 *) values)[i]) / (double) ((1 << 8) - 1));
     }
 
   private:
     double get_value_double(uint i)
     {
       DBUG_ASSERT(i < get_width());
-      return (double) (((double *) values)[i]);
+      // sql_print_information("[GET] value[%u] = %f", i, (((uint8 *) values)[i]) / (double) ((1 << 8) - 1));
+      return (((uint8 *) values)[i]) / (double) ((1 << 8) - 1);
     }
 };
 
